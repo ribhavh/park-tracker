@@ -11,6 +11,8 @@ final class ParkData {
     let region: MKCoordinateRegion
     /// Total length of the whole path network, in meters.
     let totalMeters: Double
+    /// Closed ring of the Central Park outline (lon/lat), for inside/outside tests.
+    let boundary: [CLLocationCoordinate2D]
 
     /// Uniform grid hash: cell -> indices into `segments`.
     private let index: [GridKey: [Int]]
@@ -19,23 +21,35 @@ final class ParkData {
 
     // MARK: - Loading
 
-    /// Loads `centralpark_paths.geojson` from the app bundle. Traps on failure —
-    /// the data ships inside the app, so a miss means a build/packaging bug.
+    /// Loads the bundled path network and park boundary. Traps on failure — the
+    /// data ships inside the app, so a miss means a build/packaging bug.
     static func loadBundled() -> ParkData {
-        guard let url = Bundle.main.url(forResource: "centralpark_paths",
-                                        withExtension: "geojson") else {
+        guard let pathsURL = Bundle.main.url(forResource: "centralpark_paths",
+                                             withExtension: "geojson") else {
             fatalError("centralpark_paths.geojson missing from app bundle")
         }
         do {
-            let data = try Data(contentsOf: url)
-            let fc = try JSONDecoder().decode(FeatureCollection.self, from: data)
-            return ParkData(features: fc.features)
+            let fc = try JSONDecoder().decode(
+                FeatureCollection.self, from: Data(contentsOf: pathsURL))
+            return ParkData(features: fc.features, boundary: loadBoundary())
         } catch {
             fatalError("Failed to load park data: \(error)")
         }
     }
 
-    init(features: [Feature]) {
+    private static func loadBoundary() -> [CLLocationCoordinate2D] {
+        guard let url = Bundle.main.url(forResource: "centralpark_boundary",
+                                        withExtension: "geojson"),
+              let data = try? Data(contentsOf: url),
+              let fc = try? JSONDecoder().decode(PolygonCollection.self, from: data),
+              let ring = fc.features.first?.geometry.coordinates.first else {
+            return []
+        }
+        return ring.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
+    }
+
+    init(features: [Feature], boundary: [CLLocationCoordinate2D] = []) {
+        self.boundary = boundary
         let maxSegmentMeters = 20.0
         var segs: [PathSegment] = []
         segs.reserveCapacity(features.count * 4)
@@ -121,6 +135,24 @@ final class ParkData {
         return Array(out)
     }
 
+    /// True if `coord` is inside the Central Park outline (ray-casting). Falls
+    /// back to `true` if no boundary is available, so tracking never breaks.
+    func isInsidePark(_ coord: CLLocationCoordinate2D) -> Bool {
+        guard boundary.count > 2 else { return true }
+        var inside = false
+        var j = boundary.count - 1
+        for i in 0..<boundary.count {
+            let a = boundary[i], b = boundary[j]
+            if (a.latitude > coord.latitude) != (b.latitude > coord.latitude) {
+                let t = (coord.latitude - a.latitude) / (b.latitude - a.latitude)
+                let x = a.longitude + t * (b.longitude - a.longitude)
+                if coord.longitude < x { inside.toggle() }
+            }
+            j = i
+        }
+        return inside
+    }
+
     // MARK: - Helpers
 
     private static func lerp(_ a: CLLocationCoordinate2D,
@@ -151,4 +183,9 @@ final class ParkData {
         let type: String
         let coordinates: [[Double]]
     }
+
+    // Boundary polygon decoding (coordinates: [ring][point][lon,lat]).
+    struct PolygonCollection: Decodable { let features: [PolygonFeature] }
+    struct PolygonFeature: Decodable { let geometry: PolygonGeometry }
+    struct PolygonGeometry: Decodable { let coordinates: [[[Double]]] }
 }

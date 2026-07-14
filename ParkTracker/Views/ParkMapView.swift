@@ -9,6 +9,8 @@ struct ParkMapView: UIViewRepresentable {
     let coveredIDs: Set<String>
     /// Bumps when coverage grows; drives the covered-overlay rebuild.
     let coverageVersion: Int
+    /// When true, the map follows the user's location (blue dot centered).
+    var followUser: Bool = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -28,6 +30,14 @@ struct ParkMapView: UIViewRepresentable {
         map.setCameraBoundary(MKMapView.CameraBoundary(coordinateRegion: parkData.region),
                               animated: false)
 
+        // Park outline, drawn beneath the paths.
+        if parkData.boundary.count > 2 {
+            let outline = MKPolygon(coordinates: parkData.boundary,
+                                    count: parkData.boundary.count)
+            context.coordinator.boundaryOverlay = outline
+            map.addOverlay(outline, level: .aboveRoads)
+        }
+
         // Faded base layer: the entire path network, drawn once.
         let base = MKMultiPolyline(parkData.segments.map {
             MKPolyline(coordinates: [$0.start, $0.end], count: 2)
@@ -39,14 +49,23 @@ struct ParkMapView: UIViewRepresentable {
         context.coordinator.rebuildCovered(on: map, parkData: parkData, coveredIDs: coveredIDs)
         context.coordinator.lastVersion = coverageVersion
 
+        if followUser {
+            map.setUserTrackingMode(.follow, animated: false)
+        }
+
         addTrackingButton(to: map)
         return map
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        guard coverageVersion != context.coordinator.lastVersion else { return }
-        context.coordinator.rebuildCovered(on: map, parkData: parkData, coveredIDs: coveredIDs)
-        context.coordinator.lastVersion = coverageVersion
+        if coverageVersion != context.coordinator.lastVersion {
+            context.coordinator.rebuildCovered(on: map, parkData: parkData, coveredIDs: coveredIDs)
+            context.coordinator.lastVersion = coverageVersion
+        }
+        // Re-engage follow if a session just started and we're not already following.
+        if followUser, map.userTrackingMode == .none {
+            map.setUserTrackingMode(.follow, animated: true)
+        }
     }
 
     private func addTrackingButton(to map: MKMapView) {
@@ -69,6 +88,7 @@ struct ParkMapView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var baseOverlay: MKMultiPolyline?
         var coveredOverlay: MKMultiPolyline?
+        var boundaryOverlay: MKPolygon?
         var lastVersion = -1
 
         private let walkedColor = UIColor.systemGreen
@@ -86,6 +106,13 @@ struct ParkMapView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let polygon = overlay as? MKPolygon, overlay === boundaryOverlay {
+                let renderer = MKPolygonRenderer(polygon: polygon)
+                renderer.strokeColor = walkedColor.withAlphaComponent(0.5)
+                renderer.fillColor = walkedColor.withAlphaComponent(0.05)
+                renderer.lineWidth = 2
+                return renderer
+            }
             guard let multi = overlay as? MKMultiPolyline else {
                 return MKOverlayRenderer(overlay: overlay)
             }
