@@ -30,15 +30,15 @@ Then **Build & Run** (⌘R). Pick an iOS 17+ Simulator or your device.
 
 ## Verify it works (Simulator, no walking required)
 
-The repo ships a real ~2 km Central Park route for the Simulator to "walk":
+The repo ships a real ~1.2 mile Central Park route for the Simulator to "walk":
 
 1. Build & run on a Simulator.
 2. When prompted, allow location ("Allow While Using" is enough to see it work;
    "Always" is what enables background tracking).
 3. In Xcode: **Debug ▸ Simulate Location ▸ Add GPX File to Project…** and choose
    `Sample/central_park_walk.gpx`, then select it from **Debug ▸ Simulate Location**.
-4. Watch the route's paths turn from gray to **green**, and the **% complete** tick up
-   (the sample route covers ~3% of the park's ~14,900 path segments).
+4. Watch the route's paths turn from gray to **green**, and the **miles walked** and
+   **% complete** tick up (the sample route covers ~1.2 of the park's ~58 miles of paths).
 
 To test on a **real iPhone**, run on your device, grant "Always" location, and take a
 walk in the park — segments mark as you go, and progress persists across relaunches

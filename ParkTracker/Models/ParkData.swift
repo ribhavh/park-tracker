@@ -9,6 +9,8 @@ final class ParkData {
 
     let segments: [PathSegment]
     let region: MKCoordinateRegion
+    /// Total length of the whole path network, in meters.
+    let totalMeters: Double
 
     /// Uniform grid hash: cell -> indices into `segments`.
     private let index: [GridKey: [Int]]
@@ -52,13 +54,14 @@ final class ParkData {
                 let edgeLen = CLLocation(latitude: a.latitude, longitude: a.longitude)
                     .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
                 let steps = max(1, Int((edgeLen / maxSegmentMeters).rounded(.up)))
+                let pieceLen = edgeLen / Double(steps)
                 for s in 0..<steps {
                     let t0 = Double(s) / Double(steps)
                     let t1 = Double(s + 1) / Double(steps)
                     let p0 = Self.lerp(a, b, t0)
                     let p1 = Self.lerp(a, b, t1)
                     segs.append(PathSegment(id: "\(feature.properties.wayId)_\(pieceIndex)",
-                                            start: p0, end: p1))
+                                            start: p0, end: p1, lengthMeters: pieceLen))
                     pieceIndex += 1
                     for c in [p0, p1] {
                         minLat = min(minLat, c.latitude); maxLat = max(maxLat, c.latitude)
@@ -69,6 +72,7 @@ final class ParkData {
         }
 
         self.segments = segs
+        self.totalMeters = segs.reduce(0) { $0 + $1.lengthMeters }
         self.refLat = (minLat + maxLat) / 2
 
         let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,

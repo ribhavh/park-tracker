@@ -15,8 +15,8 @@ struct ContentView: View {
 
             VStack(spacing: 10) {
                 ProgressHeader(progress: model.progress,
-                               covered: model.coveredCount,
-                               total: model.totalCount)
+                               coveredMiles: model.coveredMiles,
+                               totalMiles: model.totalMiles)
                 if needsPermissionPrompt {
                     permissionBanner
                 }

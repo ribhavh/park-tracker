@@ -14,6 +14,8 @@ final class TrackerModel {
 
     /// IDs of segments walked at least once. In-memory mirror of `CoveredSegment`.
     private(set) var coveredIDs: Set<String> = []
+    /// Running total length of walked segments, in meters.
+    private(set) var coveredMeters: Double = 0
     /// Bumps whenever `coveredIDs` grows, so the map knows to redraw.
     private(set) var coverageVersion: Int = 0
 
@@ -52,12 +54,15 @@ final class TrackerModel {
 
     // MARK: - Progress
 
+    private let metersPerMile = 1609.344
+
+    /// Share of the park's total path length that has been walked.
     var progress: Double {
-        guard !parkData.segments.isEmpty else { return 0 }
-        return Double(coveredIDs.count) / Double(parkData.segments.count)
+        guard parkData.totalMeters > 0 else { return 0 }
+        return coveredMeters / parkData.totalMeters
     }
-    var coveredCount: Int { coveredIDs.count }
-    var totalCount: Int { parkData.segments.count }
+    var coveredMiles: Double { coveredMeters / metersPerMile }
+    var totalMiles: Double { parkData.totalMeters / metersPerMile }
 
     // MARK: - Tracking control
 
@@ -76,6 +81,9 @@ final class TrackerModel {
         let descriptor = FetchDescriptor<CoveredSegment>()
         if let rows = try? modelContext.fetch(descriptor) {
             coveredIDs = Set(rows.map { $0.segmentID })
+            coveredMeters = parkData.segments
+                .filter { coveredIDs.contains($0.id) }
+                .reduce(0) { $0 + $1.lengthMeters }
         }
     }
 
@@ -97,6 +105,7 @@ final class TrackerModel {
             if coveredIDs.contains(seg.id) { continue }
             if Geo.distance(from: coord, toSegment: seg.start, seg.end) <= threshold {
                 coveredIDs.insert(seg.id)
+                coveredMeters += seg.lengthMeters
                 newlyCovered.append(seg.id)
             }
         }

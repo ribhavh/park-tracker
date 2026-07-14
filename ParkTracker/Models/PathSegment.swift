@@ -9,6 +9,7 @@ struct PathSegment: Identifiable {
     let id: String
     let start: CLLocationCoordinate2D
     let end: CLLocationCoordinate2D
+    let lengthMeters: Double
 
     var midpoint: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: (start.latitude + end.latitude) / 2,

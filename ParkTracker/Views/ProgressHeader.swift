@@ -4,11 +4,15 @@ import SwiftUI
 /// bar and the raw path count. Designed to read at a glance.
 struct ProgressHeader: View {
     let progress: Double      // 0...1
-    let covered: Int
-    let total: Int
+    let coveredMiles: Double
+    let totalMiles: Double
 
     private var percentText: String {
         String(format: "%.1f%%", progress * 100)
+    }
+
+    private var milesText: String {
+        String(format: "%.1f of %.1f miles walked", coveredMiles, totalMiles)
     }
 
     var body: some View {
@@ -33,9 +37,11 @@ struct ProgressHeader: View {
                 .tint(.green)
                 .animation(.snappy, value: progress)
 
-            Text("\(covered.formatted()) of \(total.formatted()) path segments walked")
+            Text(milesText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .contentTransition(.numericText(value: coveredMiles))
+                .animation(.snappy, value: coveredMiles)
         }
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
@@ -50,7 +56,7 @@ struct ProgressHeader: View {
 #Preview {
     ZStack {
         Color.green.opacity(0.3).ignoresSafeArea()
-        ProgressHeader(progress: 0.412, covered: 1892, total: 4593)
+        ProgressHeader(progress: 0.412, coveredMiles: 23.8, totalMiles: 57.9)
             .padding()
     }
 }
