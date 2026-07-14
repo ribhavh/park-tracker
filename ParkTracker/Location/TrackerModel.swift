@@ -172,14 +172,16 @@ final class TrackerModel {
         guard location.horizontalAccuracy > 0,
               location.horizontalAccuracy <= maxAcceptableAccuracy else { return }
 
-        // Auto-stop once the user has been outside the park for the grace period.
+        // Only ever record coverage while physically inside Central Park. When
+        // outside, record nothing and auto-stop after the grace period.
         let coord = location.coordinate
-        if parkData.isInsidePark(coord) {
-            lastInsideDate = Date()
-        } else if let last = lastInsideDate, Date().timeIntervalSince(last) > exitGrace {
-            stopSession(auto: true)
+        guard parkData.isInsidePark(coord) else {
+            if let last = lastInsideDate, Date().timeIntervalSince(last) > exitGrace {
+                stopSession(auto: true)
+            }
             return
         }
+        lastInsideDate = Date()
 
         // Loosen the match tolerance for less-accurate fixes, but cap it so we
         // don't mark a parallel path a few meters away.
