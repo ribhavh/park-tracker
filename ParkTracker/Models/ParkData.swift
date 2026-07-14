@@ -37,13 +37,17 @@ final class ParkData {
         }
     }
 
+    /// The park outline gates "record only inside the park", so a missing or
+    /// malformed boundary is a build/packaging bug we surface loudly rather than
+    /// silently degrading into "record everywhere".
     private static func loadBoundary() -> [CLLocationCoordinate2D] {
         guard let url = Bundle.main.url(forResource: "centralpark_boundary",
                                         withExtension: "geojson"),
               let data = try? Data(contentsOf: url),
               let fc = try? JSONDecoder().decode(PolygonCollection.self, from: data),
-              let ring = fc.features.first?.geometry.coordinates.first else {
-            return []
+              let ring = fc.features.first?.geometry.coordinates.first,
+              ring.count > 3 else {
+            fatalError("centralpark_boundary.geojson missing or malformed in app bundle")
         }
         return ring.map { CLLocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
     }

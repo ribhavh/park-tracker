@@ -9,7 +9,8 @@ struct TrackingView: View {
             ParkMapView(parkData: model.parkData,
                         coveredIDs: model.coveredIDs,
                         coverageVersion: model.coverageVersion,
-                        followUser: true)
+                        followUser: true,
+                        controlsBottomInset: 96)   // clear the Stop button below
                 .ignoresSafeArea()
 
             statsCard

@@ -87,6 +87,9 @@ final class TrackerModel {
     /// Start button: begin a session, requesting permission first if needed.
     func requestStart() {
         permissionDenied = false
+        // Ask for notification permission now, at the start of the walk, so it's
+        // resolved well before the end-of-session summary notification fires.
+        notifications.requestAuthorization()
         switch authStatus {
         case .authorizedAlways, .authorizedWhenInUse:
             beginSession()
@@ -127,7 +130,6 @@ final class TrackerModel {
         sessionElapsed = 0
         lastInsideDate = Date()
         phase = .tracking
-        notifications.requestAuthorization()
         locationManager.start()
 
         elapsedTimer?.invalidate()

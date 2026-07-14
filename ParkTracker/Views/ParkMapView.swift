@@ -7,10 +7,13 @@ import MapKit
 struct ParkMapView: UIViewRepresentable {
     let parkData: ParkData
     let coveredIDs: Set<String>
-    /// Bumps when coverage grows; drives the covered-overlay rebuild.
+    /// Bumps when coverage grows; nudges SwiftUI to call `updateUIView`.
     let coverageVersion: Int
-    /// When true, the map follows the user's location (blue dot centered).
+    /// When true, the map starts out following the user's location.
     var followUser: Bool = false
+    /// Bottom inset for the recenter button, so callers can lift it above their
+    /// own bottom controls (e.g. the Stop button on the tracking screen).
+    var controlsBottomInset: CGFloat = 24
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -30,6 +33,8 @@ struct ParkMapView: UIViewRepresentable {
         map.setCameraBoundary(MKMapView.CameraBoundary(coordinateRegion: parkData.region),
                               animated: false)
 
+        context.coordinator.prepare(parkData: parkData)
+
         // Park outline, drawn beneath the paths.
         if parkData.boundary.count > 2 {
             let outline = MKPolygon(coordinates: parkData.boundary,
@@ -45,9 +50,8 @@ struct ParkMapView: UIViewRepresentable {
         context.coordinator.baseOverlay = base
         map.addOverlay(base, level: .aboveRoads)
 
-        // Initial covered layer (restored from previous sessions).
-        context.coordinator.rebuildCovered(on: map, parkData: parkData, coveredIDs: coveredIDs)
-        context.coordinator.lastVersion = coverageVersion
+        // Walked layer, restored from previous sessions.
+        context.coordinator.syncCovered(ids: coveredIDs, on: map)
 
         if followUser {
             map.setUserTrackingMode(.follow, animated: false)
@@ -58,14 +62,10 @@ struct ParkMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        if coverageVersion != context.coordinator.lastVersion {
-            context.coordinator.rebuildCovered(on: map, parkData: parkData, coveredIDs: coveredIDs)
-            context.coordinator.lastVersion = coverageVersion
-        }
-        // Re-engage follow if a session just started and we're not already following.
-        if followUser, map.userTrackingMode == .none {
-            map.setUserTrackingMode(.follow, animated: true)
-        }
+        // Add only newly-walked segments. Deliberately does NOT re-assert
+        // follow-mode, so the user can freely pan/zoom during a session and
+        // recenter with the button when they want.
+        context.coordinator.syncCovered(ids: coveredIDs, on: map)
     }
 
     private func addTrackingButton(to map: MKMapView) {
@@ -79,7 +79,7 @@ struct ParkMapView: UIViewRepresentable {
             button.trailingAnchor.constraint(equalTo: map.safeAreaLayoutGuide.trailingAnchor,
                                              constant: -16),
             button.bottomAnchor.constraint(equalTo: map.safeAreaLayoutGuide.bottomAnchor,
-                                           constant: -24),
+                                           constant: -controlsBottomInset),
         ])
     }
 
@@ -87,22 +87,32 @@ struct ParkMapView: UIViewRepresentable {
 
     final class Coordinator: NSObject, MKMapViewDelegate {
         var baseOverlay: MKMultiPolyline?
-        var coveredOverlay: MKMultiPolyline?
         var boundaryOverlay: MKPolygon?
-        var lastVersion = -1
+
+        private var segmentByID: [String: PathSegment] = [:]
+        private var drawnCoveredIDs: Set<String> = []
 
         private let walkedColor = UIColor.systemGreen
         private let unwalkedColor = UIColor.tertiaryLabel
 
-        func rebuildCovered(on map: MKMapView, parkData: ParkData, coveredIDs: Set<String>) {
-            if let old = coveredOverlay { map.removeOverlay(old) }
-            guard !coveredIDs.isEmpty else { coveredOverlay = nil; return }
-            let lines = parkData.segments
-                .filter { coveredIDs.contains($0.id) }
+        /// Build the id → segment lookup once, for cheap incremental redraws.
+        func prepare(parkData: ParkData) {
+            guard segmentByID.isEmpty else { return }
+            segmentByID = Dictionary(
+                parkData.segments.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        }
+
+        /// Draw only the segments newly covered since the last call — avoids
+        /// rescanning the full network or redrawing the whole walked layer.
+        func syncCovered(ids: Set<String>, on map: MKMapView) {
+            let delta = ids.subtracting(drawnCoveredIDs)
+            guard !delta.isEmpty else { return }
+            let lines = delta.compactMap { segmentByID[$0] }
                 .map { MKPolyline(coordinates: [$0.start, $0.end], count: 2) }
-            let overlay = MKMultiPolyline(lines)
-            coveredOverlay = overlay
-            map.addOverlay(overlay, level: .aboveRoads)   // sits on top of the base
+            if !lines.isEmpty {
+                map.addOverlay(MKMultiPolyline(lines), level: .aboveRoads)
+            }
+            drawnCoveredIDs.formUnion(delta)
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
@@ -119,12 +129,14 @@ struct ParkMapView: UIViewRepresentable {
             let renderer = MKMultiPolylineRenderer(multiPolyline: multi)
             renderer.lineCap = .round
             renderer.lineJoin = .round
-            if overlay === coveredOverlay {
-                renderer.strokeColor = walkedColor
-                renderer.lineWidth = 5
-            } else {
+            // The base network is the only gray layer; every other multi-polyline
+            // is a walked (green) delta.
+            if overlay === baseOverlay {
                 renderer.strokeColor = unwalkedColor
                 renderer.lineWidth = 2.5
+            } else {
+                renderer.strokeColor = walkedColor
+                renderer.lineWidth = 5
             }
             return renderer
         }
