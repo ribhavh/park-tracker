@@ -139,8 +139,9 @@ final class ParkData {
         return Array(out)
     }
 
-    /// True if `coord` is inside the Central Park outline (ray-casting). Falls
-    /// back to `true` if no boundary is available, so tracking never breaks.
+    /// True if `coord` is inside the Central Park outline (ray-casting). The
+    /// boundary is a required bundled asset (see `loadBoundary`), so the empty
+    /// guard below is just defensive — in practice the ring is always present.
     func isInsidePark(_ coord: CLLocationCoordinate2D) -> Bool {
         guard boundary.count > 2 else { return true }
         var inside = false

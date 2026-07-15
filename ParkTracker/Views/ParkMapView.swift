@@ -52,6 +52,7 @@ struct ParkMapView: UIViewRepresentable {
 
         // Walked layer, restored from previous sessions.
         context.coordinator.syncCovered(ids: coveredIDs, on: map)
+        context.coordinator.lastVersion = coverageVersion
 
         if followUser {
             map.setUserTrackingMode(.follow, animated: false)
@@ -62,9 +63,12 @@ struct ParkMapView: UIViewRepresentable {
     }
 
     func updateUIView(_ map: MKMapView, context: Context) {
-        // Add only newly-walked segments. Deliberately does NOT re-assert
-        // follow-mode, so the user can freely pan/zoom during a session and
-        // recenter with the button when they want.
+        // Only touch overlays when coverage actually grew — updateUIView also runs
+        // on unrelated re-renders (e.g. the 1 Hz elapsed-time tick). Deliberately
+        // does NOT re-assert follow-mode, so the user can freely pan/zoom during a
+        // session and recenter with the button when they want.
+        guard coverageVersion != context.coordinator.lastVersion else { return }
+        context.coordinator.lastVersion = coverageVersion
         context.coordinator.syncCovered(ids: coveredIDs, on: map)
     }
 
@@ -88,6 +92,7 @@ struct ParkMapView: UIViewRepresentable {
     final class Coordinator: NSObject, MKMapViewDelegate {
         var baseOverlay: MKMultiPolyline?
         var boundaryOverlay: MKPolygon?
+        var lastVersion = -1
 
         private var segmentByID: [String: PathSegment] = [:]
         private var drawnCoveredIDs: Set<String> = []

@@ -1,7 +1,8 @@
 import CoreLocation
 
 /// Thin wrapper around `CLLocationManager`. Configured for continuous, in-pocket
-/// tracking: "Always" authorization, background updates, fitness activity type.
+/// tracking during an active session: "When In Use" authorization plus background
+/// updates (iOS shows a blue status pill while a walk is running), fitness type.
 final class LocationManager: NSObject, CLLocationManagerDelegate {
 
     private let manager = CLLocationManager()
@@ -22,19 +23,19 @@ final class LocationManager: NSObject, CLLocationManagerDelegate {
 
     var authorizationStatus: CLAuthorizationStatus { manager.authorizationStatus }
 
-    /// Prompts for "Always" access. Safe to call repeatedly.
+    /// Prompts for "When In Use" access — enough for background tracking during an
+    /// active session. Safe to call repeatedly.
     func requestAuthorization() {
-        manager.requestAlwaysAuthorization()
+        manager.requestWhenInUseAuthorization()
     }
 
-    /// Begins continuous updates. Enables background updates only once we hold a
-    /// usable authorization, which avoids a crash on misconfiguration.
+    /// Begins continuous updates. Background updates work with either "When In Use"
+    /// or "Always" (the location background mode is declared in Info.plist), so a
+    /// pocketed phone keeps tracking for the duration of the walk.
     func start() {
         let status = manager.authorizationStatus
         guard status == .authorizedAlways || status == .authorizedWhenInUse else { return }
-        if status == .authorizedAlways {
-            manager.allowsBackgroundLocationUpdates = true
-        }
+        manager.allowsBackgroundLocationUpdates = true
         manager.startUpdatingLocation()
     }
 
