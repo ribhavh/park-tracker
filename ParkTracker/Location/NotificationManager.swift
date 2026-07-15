@@ -29,12 +29,30 @@ final class NotificationManager: NSObject, UNUserNotificationCenterDelegate {
             content.body = "Today's Central Park visit didn't increase your completion rate."
         }
         content.sound = .default
+        if let icon = iconAttachment() {
+            content.attachments = [icon]   // show the app icon in the notification
+        }
 
         // Fire ~immediately.
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: 1, repeats: false)
         let request = UNNotificationRequest(identifier: UUID().uuidString,
                                             content: content, trigger: trigger)
         center.add(request)
+    }
+
+    /// The app icon as a notification image attachment. The system takes
+    /// ownership of the file, so we hand it a fresh copy in the temp directory.
+    private func iconAttachment() -> UNNotificationAttachment? {
+        guard let src = Bundle.main.url(forResource: "notification_icon",
+                                        withExtension: "png") else { return nil }
+        let dst = FileManager.default.temporaryDirectory
+            .appendingPathComponent("notif_icon_\(UUID().uuidString).png")
+        do {
+            try FileManager.default.copyItem(at: src, to: dst)
+            return try UNNotificationAttachment(identifier: "appIcon", url: dst)
+        } catch {
+            return nil
+        }
     }
 
     // Show the banner even if the app is still in the foreground (manual stop).
