@@ -163,9 +163,14 @@ struct HomeView: View {
     private func handleImport(_ result: Result<URL, Error>) {
         switch result {
         case .success(let url):
-            let added = model.importBackup(from: url)
-            show(added > 0 ? "Restored \(added) path segments."
-                           : "Nothing new to restore from that file.")
+            let result = model.importBackup(from: url)
+            var parts: [String] = []
+            if result.segments > 0 { parts.append("\(result.segments) path segments") }
+            if result.visits > 0 {
+                parts.append("\(result.visits) walk\(result.visits == 1 ? "" : "s")")
+            }
+            show(parts.isEmpty ? "Nothing new to restore from that file."
+                               : "Restored \(parts.joined(separator: " and ")).")
         case .failure:
             show("Couldn't read that file.")
         }

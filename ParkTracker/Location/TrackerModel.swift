@@ -37,7 +37,8 @@ final class TrackerModel {
     private var pendingStart = false
     private var lastInsideDate: Date?
     private var elapsedTimer: Timer?
-    private let exitGrace: TimeInterval = 120   // leave-the-park grace period
+    private let exitGrace: TimeInterval = 120          // grace after leaving the park
+    private let neverArrivedTimeout: TimeInterval = 1800  // 30 min: started, never arrived
 
     private let modelContext: ModelContext
     private let locationManager = LocationManager()
@@ -146,7 +147,10 @@ final class TrackerModel {
         sessionStartMeters = coveredMeters
         sessionStartDate = Date()
         sessionElapsed = 0
-        lastInsideDate = Date()
+        // Left nil deliberately: the leave-the-park timer only arms once you've
+        // actually been inside, so starting a walk on your way to the park
+        // doesn't auto-stop before you arrive.
+        lastInsideDate = nil
         phase = .tracking
         locationManager.start()
 
@@ -196,7 +200,12 @@ final class TrackerModel {
         // outside, record nothing and auto-stop after the grace period.
         let coord = location.coordinate
         guard parkData.isInsidePark(coord) else {
-            if let last = lastInsideDate, Date().timeIntervalSince(last) > exitGrace {
+            if let last = lastInsideDate {
+                // Been inside already — you've left the park.
+                if Date().timeIntervalSince(last) > exitGrace { stopSession(auto: true) }
+            } else if let started = sessionStartDate,
+                      Date().timeIntervalSince(started) > neverArrivedTimeout {
+                // Started but never made it to the park — don't track forever.
                 stopSession(auto: true)
             }
             return
@@ -296,16 +305,18 @@ final class TrackerModel {
         }
     }
 
-    /// Merge a JSON backup into current progress. Returns how many were added.
+    /// Merge a JSON backup into current progress, reporting what was restored.
     @discardableResult
-    func importBackup(from url: URL) -> Int {
+    func importBackup(from url: URL) -> (segments: Int, visits: Int) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let data = try? Data(contentsOf: url),
-              let backup = try? decoder.decode(Backup.self, from: data) else { return 0 }
+              let backup = try? decoder.decode(Backup.self, from: data) else {
+            return (0, 0)
+        }
 
         // Only ids that exist in the current path data and aren't already walked.
         let known = Set(parkData.segments.map(\.id))
@@ -319,23 +330,31 @@ final class TrackerModel {
         }
 
         // Restore visit history too (v2 backups), skipping ones we already have.
-        let existing = Set(((try? modelContext.fetch(FetchDescriptor<Visit>())) ?? [])
-            .map(\.startedAt))
-        for v in backup.visits ?? [] where !existing.contains(v.startedAt) {
+        // Compare at whole-second resolution: ISO-8601 export drops fractional
+        // seconds, so raw Date equality would never match and would duplicate
+        // every visit each time the same backup is imported.
+        func key(_ date: Date) -> Int { Int(date.timeIntervalSince1970.rounded()) }
+        var existing = Set(((try? modelContext.fetch(FetchDescriptor<Visit>())) ?? [])
+            .map { key($0.startedAt) })
+        var addedVisits = 0
+        for v in backup.visits ?? [] where !existing.contains(key(v.startedAt)) {
             modelContext.insert(Visit(startedAt: v.startedAt, duration: v.duration,
                                       startPercent: v.startPercent,
                                       endPercent: v.endPercent,
                                       newMiles: v.newMiles,
                                       autoStopped: v.autoStopped))
+            existing.insert(key(v.startedAt))
+            addedVisits += 1
         }
 
-        guard added > 0 else { try? modelContext.save(); return 0 }
-        coveredMeters = parkData.segments
-            .filter { coveredIDs.contains($0.id) }
-            .reduce(0) { $0 + $1.lengthMeters }
-        try? modelContext.save()
-        coverageVersion += 1
-        return added
+        if added > 0 {
+            coveredMeters = parkData.segments
+                .filter { coveredIDs.contains($0.id) }
+                .reduce(0) { $0 + $1.lengthMeters }
+            coverageVersion += 1
+        }
+        if added > 0 || addedVisits > 0 { try? modelContext.save() }
+        return (added, addedVisits)
     }
 
     struct Backup: Codable {
