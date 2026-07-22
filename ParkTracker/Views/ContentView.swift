@@ -6,8 +6,8 @@ struct ContentView: View {
     var body: some View {
         Group {
             switch model.phase {
-            case .welcome:
-                WelcomeView()
+            case .home:
+                HomeView()
                     .transition(.opacity)
             case .tracking:
                 TrackingView()

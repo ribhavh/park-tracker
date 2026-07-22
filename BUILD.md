@@ -44,12 +44,44 @@ To test on a **real iPhone**, run on your device, grant "Always" location, and t
 walk in the park — segments mark as you go, and progress persists across relaunches
 (stored with SwiftData).
 
+## Where your progress is stored
+
+Progress lives **on the device** in a SwiftData store (SQLite) inside the app's
+sandbox: one `CoveredSegment` row per walked path segment. Notes:
+
+- **Deleting the app erases it.** Reinstalling over the top (e.g. re-running from
+  Xcode when a 7-day free-provisioning signature expires) *preserves* it.
+- It is included in iPhone backups (iCloud/Finder), so a device restore brings it back.
+- Turn **off** Settings ▸ App Store ▸ *Offload Unused Apps* — a sideloaded app can't be
+  re-downloaded from the App Store.
+
+**Backup / restore / reset** are in the "..." menu on the Home screen: *Export backup*
+writes a JSON file you can save or AirDrop, *Import backup* merges one back in, and
+*Reset progress* wipes everything (export first).
+
+### Turning on iCloud sync (requires a paid Apple Developer account)
+
+The data model is already CloudKit-compatible (no `.unique` constraints, all properties
+have defaults). Free provisioning **cannot** use the iCloud capability, so this needs the
+$99/yr Apple Developer Program. Once you have it:
+
+1. In Xcode: target ▸ **Signing & Capabilities** ▸ **+ Capability** ▸ **iCloud**, tick
+   **CloudKit**, and create a container (e.g. `iCloud.com.ribhavhora.parktracker`).
+2. In `ParkTracker/App/ParkTrackerApp.swift`, build the container with CloudKit:
+   ```swift
+   let config = ModelConfiguration(cloudKitDatabase: .automatic)
+   container = try ModelContainer(for: CoveredSegment.self, configurations: config)
+   ```
+3. Rebuild. Progress then syncs through your iCloud account and survives app deletion
+   and new devices.
+
 ## Regenerating the map data
 
 The bundled path network comes from OpenStreetMap. To refresh or extend it:
 
 ```sh
 python3 Scripts/fetch_paths.py            # -> ParkTracker/Resources/centralpark_paths.geojson
+python3 Scripts/fetch_boundary.py         # -> ParkTracker/Resources/centralpark_boundary.geojson
 python3 Scripts/generate_sample_gpx.py    # -> Sample/central_park_walk.gpx
 ```
 
@@ -58,11 +90,14 @@ python3 Scripts/generate_sample_gpx.py    # -> Sample/central_park_walk.gpx
 ```
 ParkTracker/
   App/          ParkTrackerApp.swift, Info.plist (location + background modes)
-  Models/       PathSegment, ParkData (load + segment + spatial index),
-                CoveredSegment (SwiftData), Geo (distance math)
-  Location/     LocationManager (Core Location), TrackerModel (coverage engine + state)
-  Views/        ParkMapView (MKMapView overlays), ProgressHeader (% card), ContentView
-  Resources/    centralpark_paths.geojson (bundled OSM path network)
-Scripts/        fetch_paths.py, generate_sample_gpx.py
+  Models/       PathSegment, ParkData (load + segment + spatial index + park boundary),
+                CoveredSegment (SwiftData), SessionModels (AppPhase/SessionSummary),
+                Geo (distance, bearing, heading math)
+  Location/     LocationManager (Core Location), TrackerModel (coverage engine, session
+                flow, backup/reset), NotificationManager (summary notification)
+  Views/        HomeView (progress map + stats + Start), TrackingView (live session),
+                SummaryView, ParkMapView (MKMapView overlays), ContentView, ShareSheet
+  Resources/    centralpark_paths.geojson, centralpark_boundary.geojson
+Scripts/        fetch_paths.py, fetch_boundary.py, generate_sample_gpx.py
 Sample/         central_park_walk.gpx (Simulator test route)
 ```

@@ -24,7 +24,7 @@ final class TrackerModel {
 
     // MARK: - Session state
 
-    private(set) var phase: AppPhase = .welcome
+    private(set) var phase: AppPhase = .home
     var authStatus: CLAuthorizationStatus
     var lastLocation: CLLocation?
     /// Set when the user tapped Start but location access was refused.
@@ -43,10 +43,14 @@ final class TrackerModel {
     private let locationManager = LocationManager()
     private let notifications = NotificationManager()
 
-    // Matching configuration (meters).
-    private let baseThreshold: CLLocationDistance = 12
-    private let maxThreshold: CLLocationDistance = 22
-    private let maxAcceptableAccuracy: CLLocationDistance = 30
+    // Matching configuration. Deliberately strict: falsely marking a path you
+    // never walked corrupts the "100% of the park" goal far worse than missing
+    // one you did (you'll pass it again).
+    private let maxAcceptableAccuracy: CLLocationDistance = 20   // drop fuzzier fixes
+    private let minMatchRadius: CLLocationDistance = 8
+    private let maxMatchRadius: CLLocationDistance = 15
+    private let maxHeadingDelta: Double = 45                     // degrees
+    private let movingSpeed: CLLocationSpeed = 0.5               // m/s
     private let metersPerMile = 1609.344
 
     init(parkData: ParkData, modelContext: ModelContext) {
@@ -121,7 +125,7 @@ final class TrackerModel {
 
     /// Dismiss the summary and return to the welcome screen.
     func dismissSummary() {
-        phase = .welcome
+        phase = .home
     }
 
     private func beginSession() {
@@ -184,22 +188,51 @@ final class TrackerModel {
             return
         }
         lastInsideDate = Date()
+        markSegments(near: location)
+    }
 
-        // Loosen the match tolerance for less-accurate fixes, but cap it so we
-        // don't mark a parallel path a few meters away.
-        let threshold = min(maxThreshold, baseThreshold + location.horizontalAccuracy * 0.5)
+    /// Matches a fix to the path(s) you're actually walking.
+    ///
+    /// Three guards keep us off neighbouring paths, which in a dense network like
+    /// Central Park is the main source of false "walked" marks:
+    ///  1. a tight radius that only mildly widens with GPS uncertainty,
+    ///  2. a heading gate — a path crossing your direction of travel isn't the one
+    ///     you're on (this is what kills the perpendicular "spillovers"),
+    ///  3. when you're standing still there's no heading to trust, so we mark only
+    ///     the single nearest path rather than everything around you.
+    private func markSegments(near location: CLLocation) {
+        let coord = location.coordinate
+        let radius = min(maxMatchRadius,
+                         minMatchRadius + location.horizontalAccuracy * 0.35)
         let candidates = parkData.nearbySegmentIndices(
-            to: coord, radiusMeters: threshold + location.horizontalAccuracy)
+            to: coord, radiusMeters: radius + location.horizontalAccuracy)
 
-        var newlyCovered: [String] = []
+        let course = location.course
+        let isMoving = location.speed > movingSpeed && course >= 0
+
+        var matches: [Int] = []
+        var nearest: (idx: Int, dist: CLLocationDistance)?
         for idx in candidates {
             let seg = parkData.segments[idx]
-            if coveredIDs.contains(seg.id) { continue }
-            if Geo.distance(from: coord, toSegment: seg.start, seg.end) <= threshold {
-                coveredIDs.insert(seg.id)
-                coveredMeters += seg.lengthMeters
-                newlyCovered.append(seg.id)
+            let dist = Geo.distance(from: coord, toSegment: seg.start, seg.end)
+            guard dist <= radius else { continue }
+            if isMoving {
+                let segBearing = Geo.bearing(from: seg.start, to: seg.end)
+                guard Geo.headingDelta(course, segBearing) <= maxHeadingDelta else { continue }
+                matches.append(idx)
+            } else if nearest == nil || dist < nearest!.dist {
+                nearest = (idx, dist)
             }
+        }
+        if !isMoving, let nearest { matches = [nearest.idx] }
+
+        var newlyCovered: [String] = []
+        for idx in matches {
+            let seg = parkData.segments[idx]
+            if coveredIDs.contains(seg.id) { continue }
+            coveredIDs.insert(seg.id)
+            coveredMeters += seg.lengthMeters
+            newlyCovered.append(seg.id)
         }
 
         guard !newlyCovered.isEmpty else { return }
@@ -208,5 +241,76 @@ final class TrackerModel {
         }
         try? modelContext.save()
         coverageVersion += 1
+    }
+
+    // MARK: - Progress management
+
+    /// Wipe all recorded coverage (e.g. to start a clean baseline).
+    func resetProgress() {
+        try? modelContext.delete(model: CoveredSegment.self)
+        try? modelContext.save()
+        coveredIDs.removeAll()
+        coveredMeters = 0
+        sessionStartMeters = 0
+        coverageVersion += 1
+    }
+
+    /// Write a JSON backup of walked segments to a temp file for sharing.
+    func exportBackup() -> URL? {
+        let rows = (try? modelContext.fetch(FetchDescriptor<CoveredSegment>())) ?? []
+        let backup = Backup(segments: rows.map {
+            Backup.Entry(id: $0.segmentID, at: $0.firstCoveredAt)
+        })
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted]
+        guard let data = try? encoder.encode(backup) else { return nil }
+
+        let stamp = ISO8601DateFormatter().string(from: Date()).prefix(10)
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("park-tracker-backup-\(stamp).json")
+        do {
+            try data.write(to: url, options: .atomic)
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    /// Merge a JSON backup into current progress. Returns how many were added.
+    @discardableResult
+    func importBackup(from url: URL) -> Int {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let data = try? Data(contentsOf: url),
+              let backup = try? decoder.decode(Backup.self, from: data) else { return 0 }
+
+        // Only ids that exist in the current path data and aren't already walked.
+        let known = Set(parkData.segments.map(\.id))
+        var added = 0
+        for entry in backup.segments where known.contains(entry.id)
+                                        && !coveredIDs.contains(entry.id) {
+            coveredIDs.insert(entry.id)
+            modelContext.insert(CoveredSegment(segmentID: entry.id,
+                                               firstCoveredAt: entry.at))
+            added += 1
+        }
+        guard added > 0 else { return 0 }
+        coveredMeters = parkData.segments
+            .filter { coveredIDs.contains($0.id) }
+            .reduce(0) { $0 + $1.lengthMeters }
+        try? modelContext.save()
+        coverageVersion += 1
+        return added
+    }
+
+    struct Backup: Codable {
+        var version = 1
+        var exportedAt = Date()
+        var segments: [Entry]
+        struct Entry: Codable { let id: String; let at: Date }
     }
 }

@@ -2,7 +2,8 @@ import Foundation
 
 /// Which screen the app is showing.
 enum AppPhase: Equatable {
-    case welcome
+    /// Your progress map + stats, with the Start button. The app's front door.
+    case home
     case tracking
     case summary(SessionSummary)
 }

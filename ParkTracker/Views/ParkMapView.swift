@@ -96,6 +96,7 @@ struct ParkMapView: UIViewRepresentable {
 
         private var segmentByID: [String: PathSegment] = [:]
         private var drawnCoveredIDs: Set<String> = []
+        private var coveredOverlays: [MKMultiPolyline] = []
 
         private let walkedColor = UIColor.systemGreen
         private let unwalkedColor = UIColor.tertiaryLabel
@@ -109,13 +110,21 @@ struct ParkMapView: UIViewRepresentable {
 
         /// Draw only the segments newly covered since the last call — avoids
         /// rescanning the full network or redrawing the whole walked layer.
+        /// If coverage *shrank* (progress was reset), clear and start over.
         func syncCovered(ids: Set<String>, on map: MKMapView) {
+            if !drawnCoveredIDs.isSubset(of: ids) {
+                map.removeOverlays(coveredOverlays)
+                coveredOverlays.removeAll()
+                drawnCoveredIDs.removeAll()
+            }
             let delta = ids.subtracting(drawnCoveredIDs)
             guard !delta.isEmpty else { return }
             let lines = delta.compactMap { segmentByID[$0] }
                 .map { MKPolyline(coordinates: [$0.start, $0.end], count: 2) }
             if !lines.isEmpty {
-                map.addOverlay(MKMultiPolyline(lines), level: .aboveRoads)
+                let overlay = MKMultiPolyline(lines)
+                coveredOverlays.append(overlay)
+                map.addOverlay(overlay, level: .aboveRoads)
             }
             drawnCoveredIDs.formUnion(delta)
         }

@@ -28,4 +28,23 @@ enum Geo {
         let cx = a2.x + t * dx, cy = a2.y + t * dy
         return hypot(cx, cy)
     }
+
+    /// Compass bearing (degrees, 0 = north, clockwise) from `a` to `b`.
+    static func bearing(from a: CLLocationCoordinate2D,
+                        to b: CLLocationCoordinate2D) -> Double {
+        let (mLat, mLon) = metersPerDegree(atLat: (a.latitude + b.latitude) / 2)
+        let east = (b.longitude - a.longitude) * mLon
+        let north = (b.latitude - a.latitude) * mLat
+        var deg = atan2(east, north) * 180 / .pi
+        if deg < 0 { deg += 360 }
+        return deg
+    }
+
+    /// Angle between two bearings treating a path as bidirectional (0...90°),
+    /// so walking a path "backwards" still counts as aligned.
+    static func headingDelta(_ a: Double, _ b: Double) -> Double {
+        var d = abs(a - b).truncatingRemainder(dividingBy: 180)
+        if d > 90 { d = 180 - d }
+        return d
+    }
 }
