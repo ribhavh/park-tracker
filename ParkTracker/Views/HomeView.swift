@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var sharePayload: SharePayload?
     @State private var importing = false
     @State private var confirmingReset = false
+    @State private var showingHistory = false
     @State private var message: String?
 
     var body: some View {
@@ -35,6 +36,7 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .sheet(item: $sharePayload) { ShareSheet(url: $0.url) }
+        .sheet(isPresented: $showingHistory) { HistoryView() }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.json]) { result in
             handleImport(result)
@@ -73,10 +75,20 @@ struct HomeView: View {
                 .tint(.green)
                 .animation(.snappy, value: model.progress)
 
-            Text(String(format: "%.1f of %.1f miles walked",
-                        model.coveredMiles, model.totalMiles))
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text(String(format: "%.1f of %.1f miles walked",
+                            model.coveredMiles, model.totalMiles))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button { showingHistory = true } label: {
+                    HStack(spacing: 3) {
+                        Text("History")
+                        Image(systemName: "chevron.right").font(.caption2)
+                    }
+                    .font(.caption.weight(.semibold))
+                }
+            }
         }
         .padding(16)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))

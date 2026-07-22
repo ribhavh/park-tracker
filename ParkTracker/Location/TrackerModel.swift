@@ -119,6 +119,20 @@ final class TrackerModel {
             milesAdded: max(0, (coveredMeters - start) / metersPerMile),
             duration: sessionStartDate.map { Date().timeIntervalSince($0) } ?? sessionElapsed,
             autoStopped: auto)
+
+        // Only log visits that actually covered new ground — a session started by
+        // accident, or one spent entirely on already-walked paths, isn't a visit
+        // worth showing.
+        if coveredMeters > start {
+            modelContext.insert(Visit(startedAt: sessionStartDate ?? Date(),
+                                      duration: summary.duration,
+                                      startPercent: summary.startPercent,
+                                      endPercent: summary.endPercent,
+                                      newMiles: summary.milesAdded,
+                                      autoStopped: auto))
+            try? modelContext.save()
+        }
+
         notifications.postSummary(summary)
         phase = .summary(summary)
     }
@@ -255,12 +269,17 @@ final class TrackerModel {
         coverageVersion += 1
     }
 
-    /// Write a JSON backup of walked segments to a temp file for sharing.
+    /// Write a JSON backup of walked segments and visit history to a temp file.
     func exportBackup() -> URL? {
         let rows = (try? modelContext.fetch(FetchDescriptor<CoveredSegment>())) ?? []
-        let backup = Backup(segments: rows.map {
-            Backup.Entry(id: $0.segmentID, at: $0.firstCoveredAt)
-        })
+        let visits = (try? modelContext.fetch(FetchDescriptor<Visit>())) ?? []
+        let backup = Backup(
+            segments: rows.map { Backup.Entry(id: $0.segmentID, at: $0.firstCoveredAt) },
+            visits: visits.map {
+                Backup.VisitEntry(startedAt: $0.startedAt, duration: $0.duration,
+                                  startPercent: $0.startPercent, endPercent: $0.endPercent,
+                                  newMiles: $0.newMiles, autoStopped: $0.autoStopped)
+            })
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted]
@@ -298,7 +317,19 @@ final class TrackerModel {
                                                firstCoveredAt: entry.at))
             added += 1
         }
-        guard added > 0 else { return 0 }
+
+        // Restore visit history too (v2 backups), skipping ones we already have.
+        let existing = Set(((try? modelContext.fetch(FetchDescriptor<Visit>())) ?? [])
+            .map(\.startedAt))
+        for v in backup.visits ?? [] where !existing.contains(v.startedAt) {
+            modelContext.insert(Visit(startedAt: v.startedAt, duration: v.duration,
+                                      startPercent: v.startPercent,
+                                      endPercent: v.endPercent,
+                                      newMiles: v.newMiles,
+                                      autoStopped: v.autoStopped))
+        }
+
+        guard added > 0 else { try? modelContext.save(); return 0 }
         coveredMeters = parkData.segments
             .filter { coveredIDs.contains($0.id) }
             .reduce(0) { $0 + $1.lengthMeters }
@@ -308,9 +339,19 @@ final class TrackerModel {
     }
 
     struct Backup: Codable {
-        var version = 1
+        var version = 2
         var exportedAt = Date()
         var segments: [Entry]
+        /// Absent in version-1 backups.
+        var visits: [VisitEntry]?
         struct Entry: Codable { let id: String; let at: Date }
+        struct VisitEntry: Codable {
+            let startedAt: Date
+            let duration: TimeInterval
+            let startPercent: Double
+            let endPercent: Double
+            let newMiles: Double
+            let autoStopped: Bool
+        }
     }
 }

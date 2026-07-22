@@ -9,7 +9,7 @@ struct ParkTrackerApp: App {
     init() {
         let container: ModelContainer
         do {
-            container = try ModelContainer(for: CoveredSegment.self)
+            container = try ModelContainer(for: CoveredSegment.self, Visit.self)
         } catch {
             fatalError("Could not create ModelContainer: \(error)")
         }
