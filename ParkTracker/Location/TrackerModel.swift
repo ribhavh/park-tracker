@@ -59,6 +59,7 @@ final class TrackerModel {
         self.modelContext = modelContext
         self.authStatus = locationManager.authorizationStatus
         loadCovered()
+        backfillVisitsIfNeeded()
 
         // CLLocationManager delivers callbacks on the main thread (it's created
         // here on the main actor), so we can assume main-actor isolation.
@@ -190,6 +191,65 @@ final class TrackerModel {
         }
     }
 
+    // MARK: - History reconstruction
+
+    /// Recreate a Visit for each past day that has walked paths but no logged
+    /// visit, using the date each path was first walked. Idempotent: days that
+    /// already have any visit are skipped, so this is safe to run every launch.
+    private func backfillVisitsIfNeeded() {
+        guard parkData.totalMeters > 0,
+              let rows = try? modelContext.fetch(FetchDescriptor<CoveredSegment>()),
+              !rows.isEmpty else { return }
+
+        let lengthByID = Dictionary(parkData.segments.map { ($0.id, $0.lengthMeters) },
+                                    uniquingKeysWith: { a, _ in a })
+        let calendar = Calendar.current
+        let existingDays = Set(((try? modelContext.fetch(FetchDescriptor<Visit>())) ?? [])
+            .map { calendar.startOfDay(for: $0.startedAt) })
+
+        // Group each walked segment's length + timestamp by calendar day.
+        var byDay: [Date: [(date: Date, meters: Double)]] = [:]
+        for row in rows {
+            guard let meters = lengthByID[row.segmentID] else { continue }  // stale id
+            let day = calendar.startOfDay(for: row.firstCoveredAt)
+            byDay[day, default: []].append((row.firstCoveredAt, meters))
+        }
+
+        var cumulativeBefore = 0.0
+        var inserted = false
+        for day in byDay.keys.sorted() {
+            let entries = byDay[day]!
+            let dayMeters = entries.reduce(0) { $0 + $1.meters }
+            defer { cumulativeBefore += dayMeters }   // runs even when we skip below
+            guard !existingDays.contains(day) else { continue }
+
+            let dates = entries.map(\.date)
+            let started = dates.min() ?? day
+            let visit = Visit(
+                startedAt: started,
+                duration: (dates.max() ?? started).timeIntervalSince(started),
+                startPercent: cumulativeBefore / parkData.totalMeters,
+                endPercent: (cumulativeBefore + dayMeters) / parkData.totalMeters,
+                newMiles: dayMeters / metersPerMile,
+                autoStopped: false,
+                isBackfilled: true)
+            modelContext.insert(visit)
+            inserted = true
+        }
+        if inserted { try? modelContext.save() }
+    }
+
+    /// The path segments first walked during a given visit — what to highlight
+    /// on that day's detail map.
+    func highlightedSegments(for visit: Visit) -> [PathSegment] {
+        let start = visit.startedAt.addingTimeInterval(-1)
+        let end = visit.startedAt.addingTimeInterval(visit.duration + 1)
+        let rows = (try? modelContext.fetch(FetchDescriptor<CoveredSegment>())) ?? []
+        let ids = Set(rows.filter { $0.firstCoveredAt >= start && $0.firstCoveredAt <= end }
+            .map(\.segmentID))
+        return parkData.segments.filter { ids.contains($0.id) }
+    }
+
     private func ingest(_ location: CLLocation) {
         guard phase == .tracking else { return }
         lastLocation = location
@@ -268,9 +328,12 @@ final class TrackerModel {
 
     // MARK: - Progress management
 
-    /// Wipe all recorded coverage (e.g. to start a clean baseline).
+    /// Wipe all recorded coverage and walk history (to start a clean baseline).
+    /// Both go together: leaving visits behind would orphan them, since their
+    /// detail maps are reconstructed from the coverage dates being deleted here.
     func resetProgress() {
         try? modelContext.delete(model: CoveredSegment.self)
+        try? modelContext.delete(model: Visit.self)
         try? modelContext.save()
         coveredIDs.removeAll()
         coveredMeters = 0
@@ -287,7 +350,8 @@ final class TrackerModel {
             visits: visits.map {
                 Backup.VisitEntry(startedAt: $0.startedAt, duration: $0.duration,
                                   startPercent: $0.startPercent, endPercent: $0.endPercent,
-                                  newMiles: $0.newMiles, autoStopped: $0.autoStopped)
+                                  newMiles: $0.newMiles, autoStopped: $0.autoStopped,
+                                  isBackfilled: $0.isBackfilled)
             })
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -342,7 +406,8 @@ final class TrackerModel {
                                       startPercent: v.startPercent,
                                       endPercent: v.endPercent,
                                       newMiles: v.newMiles,
-                                      autoStopped: v.autoStopped))
+                                      autoStopped: v.autoStopped,
+                                      isBackfilled: v.isBackfilled ?? false))
             existing.insert(key(v.startedAt))
             addedVisits += 1
         }
@@ -371,6 +436,7 @@ final class TrackerModel {
             let endPercent: Double
             let newMiles: Double
             let autoStopped: Bool
+            var isBackfilled: Bool?   // absent in earlier v2 backups
         }
     }
 }

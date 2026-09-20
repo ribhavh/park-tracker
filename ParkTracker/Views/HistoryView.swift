@@ -26,7 +26,7 @@ struct HistoryView: View {
         List {
             Section {
                 ForEach(visits) { visit in
-                    row(visit)
+                    NavigationLink { VisitDetailView(visit: visit) } label: { row(visit) }
                 }
                 .onDelete(perform: delete)
             } header: {
@@ -55,12 +55,18 @@ struct HistoryView: View {
 
             HStack(spacing: 6) {
                 Text(String(format: "%.2f mi new", visit.newMiles))
-                Text("·")
-                Text(durationText(visit.duration))
+                if !visit.isBackfilled {
+                    Text("·")
+                    Text(durationText(visit.duration))
+                }
                 if visit.autoStopped {
                     Text("·")
                     Label("ended automatically", systemImage: "mappin.slash")
                         .labelStyle(.titleAndIcon)
+                }
+                if visit.isBackfilled {
+                    Text("·")
+                    Text("reconstructed")
                 }
             }
             .font(.caption)

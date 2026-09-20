@@ -49,7 +49,7 @@ struct HomeView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This erases every path you've walked. It can't be undone — export a backup first if you want to keep it.")
+            Text("This erases every path you've walked and your walk history. It can't be undone, so export a backup first if you want to keep it.")
         }
     }
 
