@@ -17,19 +17,24 @@ final class Visit {
     var newMiles: Double = 0
     /// True when the walk ended because you left the park.
     var autoStopped: Bool = false
+    /// True when reconstructed from saved path dates (walks that predate live
+    /// session logging), so the UI can label it and treat duration as approximate.
+    var isBackfilled: Bool = false
 
     init(startedAt: Date,
          duration: TimeInterval,
          startPercent: Double,
          endPercent: Double,
          newMiles: Double,
-         autoStopped: Bool) {
+         autoStopped: Bool,
+         isBackfilled: Bool = false) {
         self.startedAt = startedAt
         self.duration = duration
         self.startPercent = startPercent
         self.endPercent = endPercent
         self.newMiles = newMiles
         self.autoStopped = autoStopped
+        self.isBackfilled = isBackfilled
     }
 
     var gainedPercent: Double { max(0, endPercent - startPercent) }
