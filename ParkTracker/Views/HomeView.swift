@@ -13,6 +13,7 @@ struct HomeView: View {
     @State private var importing = false
     @State private var confirmingReset = false
     @State private var showingHistory = false
+    @State private var showingAbout = false
     @State private var message: String?
 
     var body: some View {
@@ -37,6 +38,7 @@ struct HomeView: View {
         }
         .sheet(item: $sharePayload) { ShareSheet(url: $0.url) }
         .sheet(isPresented: $showingHistory) { HistoryView() }
+        .sheet(isPresented: $showingAbout) { AboutView() }
         .fileImporter(isPresented: $importing,
                       allowedContentTypes: [.json]) { result in
             handleImport(result)
@@ -101,6 +103,10 @@ struct HomeView: View {
 
     private var menu: some View {
         Menu {
+            Button { model.startDemoWalk() } label: {
+                Label("Replay sample walk (demo)", systemImage: "play.circle")
+            }
+            Divider()
             Button {
                 if let url = model.exportBackup() {
                     sharePayload = SharePayload(url: url)
@@ -114,6 +120,9 @@ struct HomeView: View {
                 Label("Import backup", systemImage: "square.and.arrow.down")
             }
             Divider()
+            Button { showingAbout = true } label: {
+                Label("About & privacy", systemImage: "info.circle")
+            }
             Button(role: .destructive) { confirmingReset = true } label: {
                 Label("Reset progress", systemImage: "trash")
             }

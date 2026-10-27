@@ -101,3 +101,40 @@ ParkTracker/
 Scripts/        fetch_paths.py, fetch_boundary.py, generate_sample_gpx.py
 Sample/         central_park_walk.gpx (Simulator test route)
 ```
+
+## Submitting to the App Store
+
+Three things App Review needs, all handled in the app/repo:
+
+### 1. Demo mode (reviewers cannot walk Central Park)
+The app ships a built-in demo: on the home screen, tap the **"..." menu > Replay
+sample walk (demo)**. It replays a real ~2 km Central Park route through the exact
+tracking engine, so a reviewer can watch paths light up and the percentage climb
+**without granting location and without walking**. The demo rolls back the coverage
+it adds when it ends, so it never changes real progress.
+
+Paste this into **App Review Notes** in App Store Connect:
+
+> This app records which Central Park paths you walk, using location only during an
+> active walk. Since you cannot walk the park during review, open the "..." menu on
+> the home screen and choose "Replay sample walk (demo)" to see the full tracking
+> flow (map fills in, percentage and miles update, summary) without granting
+> location. Location permission is requested only when starting a real walk.
+
+### 2. Privacy policy URL
+Set the Privacy Policy URL in App Store Connect to the public policy, e.g.
+`https://github.com/ribhavh/park-tracker/blob/main/PRIVACY.md` (or host
+`PRIVACY.md` on GitHub Pages). The same policy is linked in-app under
+**"..." menu > About & privacy**.
+
+### 3. Location purpose and attribution
+- The "while using / background" location purpose strings are in
+  `ParkTracker/App/Info.plist` and explain that location records walked paths.
+- In **App Privacy** (App Store Connect), declare Location collected and used for
+  **App Functionality**, **not linked to identity**, and **not used for tracking**
+  (data stays on device).
+- OpenStreetMap attribution appears in-app under **About & privacy** and in this
+  repo; keep "© OpenStreetMap contributors (ODbL)" if you redistribute the data.
+
+Also required for any submission: a paid Apple Developer account ($99/yr),
+screenshots, an app icon (bundled), and an age rating.

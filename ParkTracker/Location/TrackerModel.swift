@@ -31,12 +31,20 @@ final class TrackerModel {
     private(set) var permissionDenied = false
     /// Seconds elapsed in the current session (updated ~1×/sec while tracking).
     private(set) var sessionElapsed: TimeInterval = 0
+    /// True while replaying the bundled sample walk (demo / App Review).
+    private(set) var isDemo = false
 
     private var sessionStartMeters: Double = 0
     private var sessionStartDate: Date?
     private var pendingStart = false
     private var lastInsideDate: Date?
     private var elapsedTimer: Timer?
+
+    // Demo playback.
+    private var demoRoute: [CLLocationCoordinate2D] = []
+    private var demoIndex = 0
+    private var demoBaselineIDs: Set<String> = []
+    private var demoTimer: Timer?
     private let exitGrace: TimeInterval = 120          // grace after leaving the park
     private let neverArrivedTimeout: TimeInterval = 1800  // 30 min: started, never arrived
 
@@ -154,13 +162,87 @@ final class TrackerModel {
         lastInsideDate = nil
         phase = .tracking
         locationManager.start()
+        startElapsedTimer()
+    }
 
+    private func startElapsedTimer() {
         elapsedTimer?.invalidate()
         elapsedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, let start = self.sessionStartDate else { return }
                 self.sessionElapsed = Date().timeIntervalSince(start)
             }
+        }
+    }
+
+    // MARK: - Demo walk (App Review / try-before-you-walk)
+
+    /// Replay the bundled sample Central Park walk so the app can be seen working
+    /// without physically walking (and without granting location). Any coverage it
+    /// adds is rolled back when the demo ends, so real progress is never touched.
+    func startDemoWalk() {
+        guard phase == .home else { return }
+        demoRoute = Self.loadDemoRoute()
+        guard demoRoute.count > 1 else { return }
+        isDemo = true
+        demoIndex = 0
+        demoBaselineIDs = coveredIDs
+        sessionStartMeters = coveredMeters
+        sessionStartDate = Date()
+        sessionElapsed = 0
+        lastInsideDate = Date()
+        phase = .tracking
+        startElapsedTimer()
+        demoTimer = Timer.scheduledTimer(withTimeInterval: 0.12, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.feedDemoPoint() }
+        }
+    }
+
+    private func feedDemoPoint() {
+        guard isDemo, demoIndex < demoRoute.count else { endDemoWalk(); return }
+        let coord = demoRoute[demoIndex]
+        let prev = demoIndex > 0 ? demoRoute[demoIndex - 1] : coord
+        let course = Geo.bearing(from: prev, to: coord)
+        let fix = CLLocation(coordinate: coord, altitude: 0,
+                             horizontalAccuracy: 5, verticalAccuracy: 5,
+                             course: course, speed: 1.4, timestamp: Date())
+        demoIndex += 1
+        ingest(fix)   // same engine as a real walk
+    }
+
+    /// End the demo and roll back every segment it marked, leaving real progress
+    /// exactly as it was. No visit is logged.
+    func endDemoWalk() {
+        guard isDemo else { return }
+        demoTimer?.invalidate(); demoTimer = nil
+        elapsedTimer?.invalidate(); elapsedTimer = nil
+
+        let added = coveredIDs.subtracting(demoBaselineIDs)
+        if !added.isEmpty {
+            let rows = (try? modelContext.fetch(FetchDescriptor<CoveredSegment>())) ?? []
+            for row in rows where added.contains(row.segmentID) { modelContext.delete(row) }
+            try? modelContext.save()
+            coveredIDs = demoBaselineIDs
+            coveredMeters = parkData.segments
+                .filter { coveredIDs.contains($0.id) }.reduce(0) { $0 + $1.lengthMeters }
+        }
+        isDemo = false
+        demoRoute = []
+        coverageVersion += 1   // clear the demo overlay from the map
+        phase = .home
+    }
+
+    /// Stop button: ends a demo without saving, or finishes a real walk.
+    func requestStop() {
+        if isDemo { endDemoWalk() } else { stopSession(auto: false) }
+    }
+
+    private static func loadDemoRoute() -> [CLLocationCoordinate2D] {
+        guard let url = Bundle.main.url(forResource: "demo_walk", withExtension: "json"),
+              let data = try? Data(contentsOf: url),
+              let pairs = try? JSONDecoder().decode([[Double]].self, from: data) else { return [] }
+        return pairs.compactMap { pair in
+            pair.count == 2 ? CLLocationCoordinate2D(latitude: pair[0], longitude: pair[1]) : nil
         }
     }
 
