@@ -13,9 +13,12 @@ struct TrackingView: View {
                         controlsBottomInset: 96)   // clear the Stop button below
                 .ignoresSafeArea()
 
-            statsCard
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
+            VStack(spacing: 8) {
+                statsCard
+                if model.isDemo { demoBadge }
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
 
             VStack {
                 Spacer()
@@ -59,9 +62,18 @@ struct TrackingView: View {
         Rectangle().fill(.secondary.opacity(0.25)).frame(width: 0.5, height: 34)
     }
 
+    private var demoBadge: some View {
+        Label("Demo walk, replaying a sample route", systemImage: "play.circle.fill")
+            .font(.caption.weight(.semibold))
+            .padding(.vertical, 8)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .background(.ultraThinMaterial, in: Capsule())
+    }
+
     private var stopButton: some View {
-        Button(role: .destructive, action: { model.stopSession(auto: false) }) {
-            Label("Stop walk", systemImage: "stop.fill")
+        Button(role: .destructive, action: { model.requestStop() }) {
+            Label(model.isDemo ? "End demo" : "Stop walk", systemImage: "stop.fill")
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 16)
