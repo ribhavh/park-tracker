@@ -1,8 +1,8 @@
-# Privacy Policy — Park Tracker
+# Privacy Policy: Central Park Tracker
 
 _Last updated: 2026-10-26_
 
-Park Tracker ("the app") helps you track which paths of Central Park you have
+Central Park Tracker ("the app") helps you track which paths of Central Park you have
 walked. This policy explains what data the app uses and how.
 
 ## The short version
@@ -35,7 +35,7 @@ walked. This policy explains what data the app uses and how.
   backups (iCloud or Finder).
 - You can **export** a backup file, **import** one, or **reset** all progress at
   any time from the in-app menu.
-- You can revoke location access at any time in **Settings > Park Tracker >
+- You can revoke location access at any time in **Settings > Central Park Tracker >
   Location**. The app still opens and shows your existing progress, but cannot
   record new walks until access is restored.
 - Deleting the app removes all of its on-device data.

@@ -14,7 +14,7 @@ struct AboutView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Central Park on foot")
+                        Text("Central Park Tracker")
                             .font(.headline)
                         Text("Track which of Central Park's paths you've walked, toward 100 percent.")
                             .font(.subheadline)

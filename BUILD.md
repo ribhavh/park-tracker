@@ -1,4 +1,4 @@
-# Building & Running Park Tracker
+# Building & Running Central Park Tracker
 
 A native iOS app that tracks which of **Central Park's walking paths** you've walked
 and shows your **% complete** on a live map. Walked paths light up green against the
